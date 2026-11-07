@@ -140,9 +140,25 @@ body {
 
 .front {
   position: absolute; z-index: 3;
-  top: 12px; right: 12px;
+  top: 12px; right: 55px;
   padding: 7px 12px 7px 9px; font-size: 12.5px;
 }
+.fs { position: absolute; z-index: 3; top: 12px; right: 12px; padding: 7px; }
+.fs .fs-out, .fs[aria-pressed="true"] .fs-in { display: none; }
+.fs[aria-pressed="true"] .fs-out { display: block; }
+/* full screen: the stage alone fills the screen (native full screen, or covering the page where that isn't allowed) */
+.stage:fullscreen { border-radius: 0; }
+.stage:-webkit-full-screen { border-radius: 0; }
+.stage.fill { position: fixed; inset: 0; z-index: 50; border-radius: 0; }
+.gpu-tip {
+  position: absolute; z-index: 5; left: 50%; top: 56px; transform: translateX(-50%);
+  width: min(470px, calc(100% - 24px)); display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; border-radius: 14px; font-size: 13px; line-height: 1.45;
+  background: var(--label); color: var(--label-ink); border: 1.5px solid var(--stitch); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+.gpu-tip[hidden] { display: none; }
+.gpu-tip p { margin: 0; }
+.gpu-tip button { flex: none; border: 0; padding: 0 2px; background: none; color: inherit; font-size: 20px; line-height: 1; cursor: pointer; }
 .hint {
   position: absolute; z-index: 1; left: 50%; bottom: 10px; transform: translateX(-50%);
   margin: 0; max-width: calc(100% - 24px); pointer-events: none;
@@ -269,6 +285,7 @@ body {
   .pill-label { display: none; }
   .pill { padding: 9px; }
   .front .pill-label { display: inline; }
+  .front { right: 59px; }
   .front { padding: 7px 11px 7px 9px; }
   .hint-more { display: none; }
 }
@@ -331,7 +348,7 @@ body {
 
   <section class="stage" id="stage">
     <canvas id="gl" tabindex="0" role="application" aria-roledescription="3D plush toy"
-      aria-label="Tamago, a fluffy egg plush in 3D. Arrow keys turn it. Shift and an arrow key strokes it. Space boops it; hold Space to squish it. Number keys 1 to 6 pick a grooming tool, H hugs it, and C opens the egg carton."></canvas>
+      aria-label="Tamago, a fluffy egg plush in 3D. Arrow keys turn it. Shift and an arrow key strokes it. Space boops it; hold Space to squish it. Number keys 1 to 6 pick a grooming tool, H hugs it, C opens the egg carton, and F toggles full screen."></canvas>
     <div class="bubble" id="bubble" aria-live="polite"><div class="bubble-in"><span class="ja" id="bubbleJa" lang="ja"></span><span class="en" id="bubbleEn"></span></div></div>
     <div class="bubble right" id="bubble2" aria-live="polite"><div class="bubble-in"><span class="ja" id="bubble2Ja" lang="ja"></span><span class="en" id="bubble2En"></span></div></div>
     <div class="bubble right" id="bubble3" aria-live="polite"><div class="bubble-in"><span class="ja" id="bubble3Ja" lang="ja"></span><span class="en" id="bubble3En"></span></div></div>
@@ -368,6 +385,14 @@ body {
       </svg>
       <span class="pill-label">Face front</span>
     </button>
+    <button class="pill fs" id="fsBtn" type="button" aria-pressed="false" aria-label="Full screen" title="Full screen (F)">
+      <svg class="fs-in" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
+      <svg class="fs-out" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
+    </button>
+    <div class="gpu-tip" id="gpuTip" role="status" hidden>
+      <p><b>Tamago is running without your graphics card</b>, so it will feel slow. Turn on <b>graphics (hardware) acceleration</b> in your browser's settings, then restart the browser. Edge and Chrome: Settings → System. Firefox: Settings → General → Performance.</p>
+      <button type="button" id="gpuTipClose" aria-label="Dismiss">×</button>
+    </div>
     <p class="hint" id="hint"><span id="hintPet"><b>Drag on it</b> to stroke, <b>beside it</b> to turn it<span class="hint-more"> · <b>Tap</b> to boop · <b>Hold</b> to squish</span></span><span id="hintCarton" hidden><b>Tap an egg</b> to hold it · <b>drag</b> to turn all the way around<span class="hint-more"> · <b>tap a +</b> to add one</span></span></p>
     <div class="nogl" id="nogl" hidden><p><b>This plush needs 3D graphics (WebGL).</b> Your browser has it switched off or doesn't support it. Try turning on hardware acceleration, or open the page in another browser.</p></div>
   </section>
@@ -447,9 +472,21 @@ body {
   // Memory: sharp (high-DPI) screens skip multisample smoothing, which needs 4 extra copies of every pixel;
   // their small pixels hide jaggies anyway. 'default' power lets laptops stay on the efficient GPU.
   const DPR = window.devicePixelRatio || 1;
+  // Which chip will draw us? A browser with graphics acceleration switched off draws 3D on the CPU
+  // ("software" WebGL), which is far too slow for fur, so it starts on the lightest settings and says how to fix it.
+  const GPU_NAME = (() => {
+    try {
+      const gl = document.createElement('canvas').getContext('webgl'); if (!gl) return '';
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+      const lose = gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+      return name;
+    } catch (e) { return ''; }
+  })();
+  const SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|basic render|software/i.test(GPU_NAME);
   let renderer;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: DPR < 1.5, alpha: true, powerPreference: 'default' });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: DPR < 1.5 && !SOFTWARE_GL, alpha: true, powerPreference: 'default' });
   } catch (e) { showNoGL(); return; }
   renderer.setClearColor(0x000000, 0);
   renderer.shadowMap.enabled = true;
@@ -3161,11 +3198,16 @@ body {
   // Input
   // =====================================================================
   let cw = 300, ch = 300;
-  const Q = { pr: Math.min(DPR, 1.5), shells: 28, slow: 0 };
+  // Quality. Q.pr caps the pixel ratio; PIX_BUDGET caps the total pixels drawn, so a big window or full screen
+  // renders a little softer instead of lagging (the fur is drawn ~28 layers deep, so every pixel counts).
+  const Q = { pr: Math.min(DPR, 1.5), shells: 28, slow: 0, avg: 1 / 60 };
+  const PIX_BUDGET = SOFTWARE_GL ? 0.35e6 : 2.0e6;
+  if (SOFTWARE_GL) { Q.pr = 0.75; Q.shells = 12; sun.shadow.mapSize.set(512, 512); }
+  const pixelRatio = () => Math.max(0.5, Math.min(Q.pr, Math.sqrt(PIX_BUDGET / (cw * ch))));
   function resize() {
     const r = stage.getBoundingClientRect();
     cw = Math.max(1, r.width); ch = Math.max(1, r.height);
-    renderer.setPixelRatio(Q.pr); renderer.setSize(cw, ch, false);
+    renderer.setPixelRatio(pixelRatio()); renderer.setSize(cw, ch, false);
     camera.aspect = cw / ch; camera.updateProjectionMatrix();
   }
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
@@ -3604,6 +3646,43 @@ body {
   // ---------- buttons, chips, keyboard
   viewBtn.addEventListener('click', () => { autoSound(); if (view === 'pet') toCarton(); else pickUp(held && plushes.includes(held) ? held : plushes[0]); });
   frontBtn.addEventListener('click', () => { if (held) { held.homing = true; held.yawVel = 0; sfx.whoosh(0.4, 400, 1000, 0.12); } });
+
+  // ---------- full screen: just Tamago and the room. Uses the browser's real full screen when it's allowed,
+  // otherwise (inside an embedded frame, or on iPhone) the stage simply covers the whole page.
+  const fsBtn = $('fsBtn');
+  const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  function syncFs() {
+    const on = !!fsEl() || stage.classList.contains('fill');
+    fsBtn.setAttribute('aria-pressed', String(on));
+    fsBtn.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
+    fsBtn.title = on ? 'Exit full screen (F or Esc)' : 'Full screen (F)';
+  }
+  async function toggleFs() {
+    if (fsEl()) { try { await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen()); } catch (e) { /* already out */ } return; }
+    if (stage.classList.contains('fill')) { stage.classList.remove('fill'); syncFs(); return; }
+    const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (req && (document.fullscreenEnabled || document.webkitFullscreenEnabled)) {
+      try { await req.call(stage); canvas.focus({ preventScroll: true }); return; } catch (e) { /* not allowed here: cover the page instead */ }
+    }
+    stage.classList.add('fill'); syncFs(); canvas.focus({ preventScroll: true });
+  }
+  document.addEventListener('fullscreenchange', syncFs);
+  document.addEventListener('webkitfullscreenchange', syncFs);
+  fsBtn.addEventListener('click', () => { toggleFs(); sfx.blip(); });
+  window.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFs(); }
+    else if (e.key === 'Escape' && stage.classList.contains('fill')) { stage.classList.remove('fill'); syncFs(); }
+  });
+
+  // ---------- running without a graphics card: say how to fix it (once; it can be dismissed)
+  const gpuTip = $('gpuTip');
+  if (SOFTWARE_GL && store.get('tamago.gputip.v1') !== 'closed') {
+    gpuTip.hidden = false;
+    $('gpuTipClose').addEventListener('click', () => { gpuTip.hidden = true; store.set('tamago.gputip.v1', 'closed'); });
+  }
   smoothBtn.addEventListener('click', () => {
     autoSound();
     const targets = view === 'pet' && held ? [held] : plushes;
@@ -3972,14 +4051,24 @@ body {
     cartonText.textContent = `${plushes.length} of 6`;
     updateAutoChip();
   }
+  // If frames run slower than ~48 fps for a second, step quality down one notch (two when it's really slow):
+  // sharpness first, then fur layers, then shadow detail. It never steps back up, so it can't flicker.
+  function lowerQuality() {
+    const pr = pixelRatio();
+    if (pr > 0.85) { Q.pr = Math.max(0.85, pr - 0.15); resize(); }
+    else if (Q.shells > 20) Q.shells -= 4;
+    else if (sun.shadow.mapSize.x > 512) { sun.shadow.mapSize.set(512, 512); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+    else if (Q.shells > 12) Q.shells -= 4;
+    else if (pr > 0.6) { Q.pr = Math.max(0.6, pr - 0.15); resize(); }
+  }
   function quality(raw) {
-    if (raw > 0.2) return;
-    if (raw > 0.028) Q.slow += raw; else Q.slow = Math.max(0, Q.slow - raw * 0.5);
-    if (Q.slow > 2) {
-      Q.slow = 0;
-      if (Q.pr > 1) { Q.pr = Math.max(1, Q.pr - 0.25); resize(); }
-      else if (sun.shadow.mapSize.x > 512) { sun.shadow.mapSize.set(512, 512); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
-      else if (Q.shells > 14) Q.shells -= 6;
+    if (raw > 0.2) return;   // a one-off hitch (tab switch, loading), not steady lag
+    Q.avg += (raw - Q.avg) * 0.1;
+    if (Q.avg > 0.021 && raw > 0.019) Q.slow += raw; else Q.slow = Math.max(0, Q.slow - raw * 0.5);
+    if (Q.slow > 1) {
+      const twice = Q.avg > 0.04;
+      Q.slow = 0; Q.avg = 1 / 60;
+      lowerQuality(); if (twice) lowerQuality();
     }
   }
 
@@ -4065,13 +4154,17 @@ body {
     uiTimer -= dt; if (uiTimer <= 0) { updateUI(); uiTimer = 0.25; }
   }
   // keep the toy running even if one effect ever throws.
-  // Capped near 60 fps on fast (120/144 Hz) screens, and about 30 fps once you've left it alone a while.
-  let frameErrors = 0, lastTick = -1e9;
+  // On fast screens (120–240 Hz) it draws every 2nd/3rd/4th refresh so it stays near 60 fps, evenly paced;
+  // 60–100 Hz screens draw every refresh. Once you've left it alone a while, about 30 fps.
+  let frameErrors = 0, lastRaf = 0, rafGap = 1000 / 60, rafN = 0;
   addEventListener('pointermove', () => { quietT = 0; }, { passive: true });
   function frame(now) {
+    if (lastRaf) rafGap += (Math.min(50, now - lastRaf) - rafGap) * 0.05;
+    lastRaf = now;
     throttled = quietT > 12 && !ptr.down && !hug.on && dry.amt < 0.01 && shw.amt < 0.01;
-    if (now - lastTick > (throttled ? 30 : 12)) {
-      lastTick = now;
+    const every = throttled ? Math.max(1, Math.round(33.3 / rafGap)) : Math.max(1, Math.floor(16.9 / rafGap));
+    if (++rafN >= every) {
+      rafN = 0;
       try { tick(now); }
       catch (e) { if (frameErrors++ < 3) console.error(e); last = now; }
     }
